@@ -1,0 +1,62 @@
+#!/usr/bin/env ruby
+
+$LOAD_PATH.push File.expand_path('../../lib', __FILE__)
+
+require 'rubygems'
+require 'commander'
+
+require 'json'
+require 'rest-client'
+require 'iron_mq'
+
+class JenkinsIronMQApplication
+  include Commander::Methods
+
+  def run
+    program :name, 'jenkmq'
+    program :version, '0.1.0'
+    program :description, 'Poll an IronMQ message queue to start jobs'
+
+    command :start do |c|
+      c.syntax = 'jenkmq start'
+      c.description = 'Starts the thing'
+      c.option '--iron_token STRING', String, 'IronMQ token'
+      c.option '--iron_project STRING', String, 'IronMQ project id'
+      c.option '--iron_queue STRING', String, 'IronMQ queue name'
+      c.option '--jenkins_url STRING', String, 'Jenkins url'
+      c.option '--jenkins_token STRING', String, 'Jenkins token'
+      c.action do |args, options|
+
+        raise "--iron_token is required" unless options.iron_token
+        raise "--iron_project is required" unless options.iron_project
+        raise "--iron_queue is required" unless options.iron_queue
+        raise "--jenkins_url is required" unless options.jenkins_url
+        raise "--jenkins_token is required" unless options.jenkins_token
+
+        ironmq = IronMQ::Client.new(:token => options.iron_token, :project_id => options.iron_project)
+
+        queue = ironmq.queue(options.iron_queue)
+        queue.poll do |msg|
+          body = JSON.parse msg.body
+
+          job_name = body['job_name']
+          job_parameter = body['job_parameter']
+
+          begin
+            jenkins_job_url = "#{options.jenkins_url}/job/#{job_name}"
+            json = JSON.generate job_parameter
+            resp = RestClient.post "#{jenkins_job_url}/build?token=#{options.jenkins_token}", :json => json
+          rescue Exception => e
+            puts "RestClient error - #{e.message}"
+          end
+
+        end
+
+      end
+    end
+
+    run!
+  end
+end
+
+JenkinsIronMQApplication.new.run
